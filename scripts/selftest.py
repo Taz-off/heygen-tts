@@ -110,7 +110,7 @@ def main():
 
     results = [
         run_case(
-            port, "simple", "bonjour ceci est un test",
+            port, "simple", "hello this is a test",
             [],
             lambda out, r: {
                 "file exists": out.exists(),
@@ -121,7 +121,7 @@ def main():
             },
         ),
         run_case(
-            port, "chunked", "Premiere phrase du script. Deuxieme phrase du script.",
+            port, "chunked", "First sentence of the script. Second sentence of the script.",
             ["--chunk", "--chunk-chars", "40"],
             lambda out, r: {
                 "file exists": out.exists(),
