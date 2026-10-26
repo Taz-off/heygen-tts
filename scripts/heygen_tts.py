@@ -33,6 +33,13 @@ CHALLENGE_RE = re.compile(
     re.I,
 )
 GENERATE_RE = re.compile(r"generate|g[eé]n[eé]rer|create speech|cr[eé]er", re.I)
+# UI labels: French is the verified locale, English is the fallback guess.
+MINE_RE = re.compile(r"^(Mes voix|My voices)$", re.I)
+LIBRARY_RE = re.compile(r"(Bibliothèque HeyGen|Voice Library|HeyGen Library)", re.I)
+SEARCH_VOICE_RE = re.compile(r"(Rechercher des voix|Search voices)", re.I)
+CREATE_VOICE_RE = re.compile(r"(Créez votre voix HeyGen|Create your HeyGen voice)", re.I)
+UPLOAD_AUDIO_RE = re.compile(r"(Téléverser de l.audio|Upload audio)", re.I)
+SELECT_VOICE_RE = re.compile(r"(Sélectionner une voix|Select voice)", re.I)
 VOICE_CARD_JS = """() => {
     const cards = [...document.querySelectorAll('button[data-atlas-id="voice-card-play-btn"]')]
         .map(b => (b.getAttribute('aria-label') || '').replace(/^Play /, ''));
@@ -51,7 +58,7 @@ def log(msg):
 
 
 def die(msg, code=5):
-    log(f"ERREUR: {msg}")
+    log(f"ERROR: {msg}")
     print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False))
     raise SystemExit(code)
 
@@ -61,7 +68,7 @@ def ensure_deps():
     try:
         import playwright  # noqa: F401
     except ImportError:
-        log("playwright absent -> installation (pip)")
+        log("playwright missing -> installing with pip")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
 
 
@@ -81,11 +88,11 @@ def open_browser(pw, headed):
     try:
         return launch(pw, headed, "chrome")
     except Exception as exc:
-        log(f"chrome systeme indisponible ({type(exc).__name__}), chromium embarque")
+        log(f"system chrome unavailable ({type(exc).__name__}), using bundled chromium")
     try:
         return launch(pw, headed)
     except Exception:
-        log("navigateur absent -> playwright install chromium")
+        log("browser missing -> playwright install chromium")
         subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
         return launch(pw, headed)
 
@@ -108,11 +115,11 @@ def has_challenge(page):
 
 
 def wait_for_human(page, minutes=5):
-    log("verification anti-bot : clique la case dans la fenetre, j'attends…")
+    log("anti-bot check: click the checkbox in the window, waiting...")
     deadline = time.time() + minutes * 60
     while time.time() < deadline:
         if not has_challenge(page):
-            log("verification passee")
+            log("verification passed")
             return True
         page.wait_for_timeout(2000)
     return False
@@ -124,9 +131,9 @@ def dump_debug(page, tag):
     try:
         (DEBUG_DIR / f"{tag}-{stamp}.html").write_text(page.content(), encoding="utf-8")
         page.screenshot(path=str(DEBUG_DIR / f"{tag}-{stamp}.png"), full_page=True)
-        log(f"debug ecrit dans {DEBUG_DIR}")
+        log(f"debug written to {DEBUG_DIR}")
     except Exception as exc:
-        log(f"debug impossible: {exc}")
+        log(f"debug failed: {exc}")
 
 
 def fill_text(page, text):
@@ -139,11 +146,11 @@ def fill_text(page, text):
             page.keyboard.press("ControlOrMeta+A")
             page.keyboard.press("Delete")
             page.keyboard.insert_text(text)
-            log(f"texte injecte dans {sel} ({len(text)} caracteres)")
+            log(f"text injected into {sel} ({len(text)} chars)")
             return sel
         except Exception:
             continue
-    raise RuntimeError("champ de texte introuvable")
+    raise RuntimeError("text field not found")
 
 
 def read_voice_cards(page):
@@ -151,36 +158,36 @@ def read_voice_cards(page):
 
 
 def pick_voice(page, voice):
-    """Ouvre le selecteur du studio, cherche la voix, la selectionne."""
+    """Open the studio voice picker, find the voice, select it."""
     if not voice:
         return
     page.locator("[data-pacific-component='VoiceComposerBox'] div[role=button]").first.click(timeout=10000)
     menu = page.get_by_role("menu")
     menu.wait_for(state="visible", timeout=15000)
-    menu.get_by_text("Mes voix", exact=True).click(timeout=8000)
+    menu.get_by_text(MINE_RE).first.click(timeout=8000)
     page.wait_for_timeout(2500)
 
     if not any(voice.lower() in name.lower() for name in read_voice_cards(page)):
-        page.get_by_text("Bibliothèque HeyGen", exact=False).first.click(timeout=8000)
+        page.get_by_text(LIBRARY_RE).first.click(timeout=8000)
         page.wait_for_timeout(1500)
-        page.get_by_placeholder("Rechercher des voix...").fill(voice)
+        page.get_by_placeholder(SEARCH_VOICE_RE).fill(voice)
         page.wait_for_timeout(2500)
 
     names = read_voice_cards(page)
     match = next((name for name in names if voice.lower() in name.lower()), None)
     if not match:
-        raise RuntimeError(f"voix '{voice}' introuvable ({', '.join(names[:5]) or 'liste vide'})")
+        raise RuntimeError(f"voice '{voice}' not found ({', '.join(names[:5]) or 'empty list'})")
     page.locator(f'div[title="{match}"]').first.click(timeout=8000)
     page.wait_for_timeout(1200)
     try:
-        page.get_by_role("button", name="Sélectionner une voix").first.click(timeout=3000)
+        page.get_by_role("button", name=SELECT_VOICE_RE).first.click(timeout=3000)
     except Exception:
-        pass  # selon la version, la ligne applique la voix directement
+        pass  # depending on the build, clicking the row applies the voice directly
     page.wait_for_timeout(1500)
     active = page.locator("[data-pacific-component='VoiceComposerBox'] div[role=button]").first.get_attribute(
         "aria-label"
     )
-    log(f"voix selectionnee: {match} -> active: {active}")
+    log(f"voice selected: {match} -> active: {active}")
     return active
 
 
@@ -190,9 +197,9 @@ def click_generate(page, button):
     if not loc.count():
         loc = page.locator("button", has_text=pattern)
     if not loc.count():
-        raise RuntimeError("bouton de generation introuvable")
+        raise RuntimeError("generate button not found")
     loc.first.click(timeout=10000)
-    log("generation lancee")
+    log("generation started")
 
 
 # ---------------------------------------------------------------- audio capture
@@ -218,7 +225,7 @@ class AudioCatcher:
         page.on("response", self._on_response)
 
     def mark(self):
-        """Ignore ce qui a ete charge avant le clic : echantillons de la liste des voix."""
+        """Drop anything loaded before the click: voice-list preview samples."""
         self.since = time.time()
         self.items.clear()
         self.streams.clear()
@@ -230,25 +237,25 @@ class AudioCatcher:
             ts = time.time()
             if "text_to_speech.stream" in url or "ndjson" in ctype:
                 self.streams.append(response)
-                log("flux TTS detecte")
+                log("TTS stream detected")
                 return
             if "audio/" in ctype or url.split("?")[0].lower().endswith(AUDIO_EXT):
                 body = response.body()
                 if len(body) > 2000:
                     self.items.append((ts, len(body), url, body))
-                    log(f"audio capture: {len(body)} octets")
+                    log(f"audio captured: {len(body)} bytes")
                     return
             if "json" in ctype:
                 found = list(_audio_urls(response.json()))
                 self.items.extend((ts, 0, url, None) for url in found)
                 if found and ts >= self.since:
-                    log(f"{len(found)} url(s) audio dans une reponse json")
+                    log(f"{len(found)} audio url(s) in a json response")
         except Exception:
             pass
 
 
 def _ndjson_audio(body):
-    """Flux text_to_speech.stream -> (mp3 complet, url de secours)."""
+    """text_to_speech.stream -> (full mp3, fallback url)."""
     chunks, url = [], None
     for line in body.splitlines():
         line = line.strip()
@@ -273,10 +280,10 @@ def _ndjson_audio(body):
 
 
 def save_audio(page, catcher, min_seconds=0.0):
-    """Premier audio capture apres le clic et assez long pour le texte demande."""
+    """First audio captured after the click, long enough for the requested text."""
     for response in catcher.streams:
         try:
-            body = response.body()  # bloque jusqu'a la fin du flux
+            body = response.body()  # blocks until the stream ends
         except Exception:
             continue
         data, url = _ndjson_audio(body)
@@ -298,7 +305,7 @@ def save_audio(page, catcher, min_seconds=0.0):
             raw.write_bytes(payload)
             seconds = duration_of(raw)
             if min_seconds and (seconds or 0) < min_seconds:
-                log(f"flux ignore ({seconds}s, il en faut {min_seconds:.0f}s)")
+                log(f"stream skipped ({seconds}s, need {min_seconds:.0f}s)")
                 continue
             return raw
 
@@ -307,7 +314,7 @@ def save_audio(page, catcher, min_seconds=0.0):
         "audio", "els => els.map(e => e.currentSrc || e.src).filter(Boolean)"
     ):
         if src.startswith("blob:"):
-            log("audio en blob: non supporte en v1")
+            log("blob audio: not supported")
             continue
         candidates.append((src, None))
     for url, body in sorted(candidates, key=lambda item: len(item[1] or b""), reverse=True):
@@ -325,7 +332,7 @@ def save_audio(page, catcher, min_seconds=0.0):
         raw.write_bytes(body)
         seconds = duration_of(raw)
         if min_seconds and (seconds or 0) < min_seconds:
-            log(f"extrait ignore ({seconds}s, il en faut {min_seconds:.0f}s)")
+            log(f"clip skipped ({seconds}s, need {min_seconds:.0f}s)")
             continue
         return raw
     return None
@@ -336,7 +343,7 @@ def to_mp3(raw, out):
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         die(
-            "ffmpeg introuvable : winget install Gyan.FFmpeg | brew install ffmpeg | sudo apt install ffmpeg",
+            "ffmpeg not found: winget install Gyan.FFmpeg | brew install ffmpeg | sudo apt install ffmpeg",
             5,
         )
     subprocess.run(
@@ -377,7 +384,7 @@ def mean_volume(path):
 def concat_audio(parts, out):
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        die("ffmpeg requis pour concatener les tranches")
+        die("ffmpeg is required to concatenate chunks")
     listing = out.with_suffix(".concat.txt")
     listing.write_text(
         "".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8"
@@ -436,9 +443,9 @@ def cmd_doctor(args):
                 report["browser"] = browser.version
                 browser.close()
         except Exception as exc:
-            report["browser"] = f"absent ({type(exc).__name__})"
+            report["browser"] = f"missing ({type(exc).__name__})"
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    ok = report["playwright"] and report["browser"] and not str(report["browser"]).startswith("absent")
+    ok = report["playwright"] and report["browser"] and not str(report["browser"]).startswith("missing")
     return 0 if ok else 2
 
 
@@ -450,19 +457,19 @@ def cmd_login(args):
         context = open_browser(pw, headed=True)
         page = context.new_page()
         page.goto(APP, wait_until="domcontentloaded")
-        log("connecte-toi dans la fenetre. J'attends jusqu'a 10 minutes.")
+        log("log in in the window. Waiting up to 10 minutes.")
         deadline = time.time() + 600
         while time.time() < deadline:
             if "auth.heygen.com" not in page.url and "/login" not in page.url:
                 page.wait_for_timeout(3000)
                 if "auth.heygen.com" not in page.url:
-                    log("session enregistree")
+                    log("session saved")
                     print(json.dumps({"ok": True, "profile": str(PROFILE)}))
                     context.close()
                     return 0
             page.wait_for_timeout(2000)
         context.close()
-        die("delai de connexion depasse", 2)
+        die("login timed out", 2)
 
 
 def cmd_voices(args):
@@ -474,30 +481,30 @@ def cmd_voices(args):
         page = context.new_page()
         if not is_logged_in(page):
             context.close()
-            die("non connecte : lance d'abord `heygen_tts.py login`", 2)
+            die("not logged in: run `heygen_tts.py login` first", 2)
         page.goto(VOICES_PAGE, wait_until="domcontentloaded")
         page.wait_for_timeout(7000)
         if has_challenge(page) and not args.headed:
             context.close()
-            log("anti-bot detecte -> relance visible")
+            log("anti-bot detected -> relaunching headed")
             context = open_browser(pw, headed=True)
             page = context.new_page()
             page.goto(VOICES_PAGE, wait_until="domcontentloaded")
             if not wait_for_human(page):
                 context.close()
-                die("verification anti-bot non passee", 3)
+                die("anti-bot verification not passed", 3)
         mine, library = [], []
         try:
-            page.get_by_text("Mes voix", exact=True).first.click(timeout=8000)
+            page.get_by_text(MINE_RE).first.click(timeout=8000)
             page.wait_for_timeout(2500)
             mine = read_voice_cards(page)
-            page.get_by_text("Bibliothèque HeyGen", exact=False).first.click(timeout=8000)
+            page.get_by_text(LIBRARY_RE).first.click(timeout=8000)
             page.wait_for_timeout(3000)
             library = read_voice_cards(page)
         except Exception as exc:
             dump_debug(page, "voices")
             context.close()
-            die(f"liste des voix illisible: {exc}", 4)
+            die(f"voice list unreadable: {exc}", 4)
         context.close()
 
     VOICES_FILE.write_text(
@@ -519,10 +526,10 @@ def cmd_voices(args):
 
 
 def cmd_clone(args):
-    """Televerse l'echantillon; nom et consentement se font dans la fenetre."""
+    """Upload the sample; naming and consent happen in the window."""
     audio = Path(args.audio).resolve()
     if not audio.exists():
-        die(f"echantillon introuvable: {audio}")
+        die(f"sample not found: {audio}")
     ensure_deps()
     from playwright.sync_api import sync_playwright
 
@@ -531,17 +538,17 @@ def cmd_clone(args):
         page = context.new_page()
         if not is_logged_in(page):
             context.close()
-            die("non connecte : lance d'abord `heygen_tts.py login`", 2)
+            die("not logged in: run `heygen_tts.py login` first", 2)
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_timeout(8000)
         if has_challenge(page) and not wait_for_human(page):
             context.close()
-            die("verification anti-bot non passee", 3)
+            die("anti-bot verification not passed", 3)
 
         try:
-            page.locator("button:visible", has_text="Créez votre voix HeyGen").first.click(timeout=15000)
+            page.locator("button:visible", has_text=CREATE_VOICE_RE).first.click(timeout=15000)
             page.wait_for_timeout(4000)
-            page.get_by_text(re.compile(r"Téléverser de l.audio")).first.click(timeout=10000)
+            page.get_by_text(UPLOAD_AUDIO_RE).first.click(timeout=10000)
             page.wait_for_timeout(3000)
             accept = page.locator("input[type=file]").first.get_attribute("accept")
             if args.dry_run:
@@ -552,9 +559,9 @@ def cmd_clone(args):
         except Exception as exc:
             dump_debug(page, "clone")
             context.close()
-            die(f"wizard de clonage inattendu: {exc}", 4)
+            die(f"unexpected clone wizard: {exc}", 4)
 
-        log(f"echantillon envoye ({audio.name}). Termine dans la fenetre : nom, consentement, puis ferme-la.")
+        log(f"sample uploaded ({audio.name}). Finish in the window: name, consent, then close it.")
         deadline = time.time() + args.wait
         try:
             while time.time() < deadline and not page.is_closed():
@@ -566,7 +573,7 @@ def cmd_clone(args):
                 {
                     "ok": True,
                     "uploaded": str(audio),
-                    "note": "lance `voices` une fois l'entrainement termine pour verifier le clone",
+                    "note": "run `voices` once training finishes to confirm the clone",
                 },
                 ensure_ascii=False,
             )
@@ -585,7 +592,7 @@ def generate_once(text, out, args):
 
         if not args.no_auth and not is_logged_in(page):
             context.close()
-            die("non connecte : lance d'abord `heygen_tts.py login`", 2)
+            die("not logged in: run `heygen_tts.py login` first", 2)
 
         page.goto(args.url, wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
@@ -593,7 +600,7 @@ def generate_once(text, out, args):
         if has_challenge(page):
             if not args.headed:
                 context.close()
-                log("anti-bot detecte -> relance en mode visible")
+                log("anti-bot detected -> relaunching headed")
                 context = open_browser(pw, headed=True)
                 page = context.new_page()
                 catcher.attach(page)
@@ -601,17 +608,17 @@ def generate_once(text, out, args):
             if not wait_for_human(page):
                 dump_debug(page, "challenge")
                 context.close()
-                die("verification anti-bot non passee", 3)
+                die("anti-bot verification not passed", 3)
 
         try:
             fill_text(page, text)
             pick_voice(page, args.voice)
-            catcher.mark()  # tout ce qui arrive maintenant vient de la generation
+            catcher.mark()  # anything arriving now comes from the generation
             click_generate(page, args.button)
         except Exception as exc:
             dump_debug(page, "generate")
             context.close()
-            die(f"interface inattendue: {exc}", 4)
+            die(f"unexpected UI: {exc}", 4)
 
         expected = len(text) / 15.0
         min_seconds = max(1.0, expected * 0.4)
@@ -625,7 +632,7 @@ def generate_once(text, out, args):
         if not raw:
             dump_debug(page, "no-audio")
             context.close()
-            die(f"aucun audio capture en {args.timeout}s (relance avec --debug)", 4)
+            die(f"no audio captured in {args.timeout}s (rerun with --debug)", 4)
 
         if args.debug:
             dump_debug(page, "success")
@@ -638,7 +645,7 @@ def generate_once(text, out, args):
 def cmd_tts(args):
     text = Path(args.text_file).read_text(encoding="utf-8") if args.text_file else args.text
     if not text or not text.strip():
-        die("texte vide")
+        die("empty text")
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     ensure_deps()
@@ -650,7 +657,7 @@ def cmd_tts(args):
         with tempfile.TemporaryDirectory() as tmp:
             parts = []
             for index, chunk in enumerate(chunks, 1):
-                log(f"tranche {index}/{len(chunks)} ({len(chunk)} caracteres)")
+                log(f"chunk {index}/{len(chunks)} ({len(chunk)} chars)")
                 part = Path(tmp) / f"part-{index:03d}.mp3"
                 generate_once(chunk, part, args)
                 parts.append(part)
@@ -674,28 +681,28 @@ def cmd_tts(args):
     }
     print(json.dumps(result, ensure_ascii=False))
     if too_short:
-        log(f"audio trop court: {duration}s pour {len(text)} caracteres (attendu ~{expected}s)")
+        log(f"audio too short: {duration}s for {len(text)} chars (expected ~{expected}s)")
         return 4
     return 0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HeyGen TTS sans credits video")
+    parser = argparse.ArgumentParser(description="HeyGen TTS without video credits")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("doctor", help="verifie python, playwright, navigateur, ffmpeg")
-    sub.add_parser("login", help="connexion unique, profil persistant")
-    p_voices = sub.add_parser("voices", help="liste Mes voix + la bibliotheque HeyGen")
+    sub.add_parser("doctor", help="check python, playwright, browser, ffmpeg")
+    sub.add_parser("login", help="one-time login, persistent profile")
+    p_voices = sub.add_parser("voices", help="list My voices + the HeyGen library")
     p_voices.add_argument("--headed", action="store_true")
-    p_voices.add_argument("--limit", type=int, default=40, help="nb de voix bibliotheque affichees")
+    p_voices.add_argument("--limit", type=int, default=40, help="how many library voices to print")
 
-    p_clone = sub.add_parser("clone", help="televerse un echantillon pour cloner ta voix")
+    p_clone = sub.add_parser("clone", help="upload a sample to clone your voice")
     p_clone.add_argument("audio")
     p_clone.add_argument("--url", default=VOICES_PAGE)
-    p_clone.add_argument("--wait", type=int, default=900, help="secondes avant fermeture auto")
-    p_clone.add_argument("--dry-run", action="store_true", help="verifie le wizard sans envoyer le fichier")
+    p_clone.add_argument("--wait", type=int, default=900, help="seconds before the window closes")
+    p_clone.add_argument("--dry-run", action="store_true", help="check the wizard without uploading")
 
-    p_tts = sub.add_parser("tts", help="texte -> mp3")
+    p_tts = sub.add_parser("tts", help="text -> mp3")
     p_tts.add_argument("--text")
     p_tts.add_argument("--text-file")
     p_tts.add_argument("--voice", default=None)
@@ -703,15 +710,15 @@ def main():
     p_tts.add_argument("--url", default=VOICE_APP)
     p_tts.add_argument("--button", default=None)
     p_tts.add_argument("--timeout", type=int, default=300)
-    p_tts.add_argument("--chunk", action="store_true", help="decoupe si l'apercu est limite")
+    p_tts.add_argument("--chunk", action="store_true", help="split long text into chunks")
     p_tts.add_argument("--chunk-chars", type=int, default=850)
     p_tts.add_argument("--headed", action="store_true")
     p_tts.add_argument("--debug", action="store_true")
-    p_tts.add_argument("--no-auth", action="store_true", help="test local uniquement")
+    p_tts.add_argument("--no-auth", action="store_true", help="local testing only")
 
     args = parser.parse_args()
     if args.command == "tts" and not (args.text or args.text_file):
-        parser.error("tts demande --text ou --text-file")
+        parser.error("tts requires --text or --text-file")
     return {
         "doctor": cmd_doctor,
         "login": cmd_login,
