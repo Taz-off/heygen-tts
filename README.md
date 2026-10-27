@@ -88,15 +88,24 @@ python scripts/heygen_tts.py clone my-voice.mp3
 |---|---|
 | `doctor` | Checks the environment |
 | `login` | One-time login, persistent profile |
-| `voices` | Lists `mine` (clones) + `library` (HeyGen library) |
+| `voices` | Lists `mine` (clones) + `library` (HeyGen library) + `defaults` |
 | `clone AUDIO` | Uploads a sample for cloning |
 | `clone AUDIO --dry-run` | Checks the wizard without uploading |
-| `tts --text "..." --out a.mp3` | Text → MP3 |
+| `tts --text "..." --out a.mp3` | Text → MP3 (default voice by language) |
 | `tts --text-file script.txt --out a.mp3` | From a file |
 | `tts ... --voice "Annie"` | With a specific voice |
 | `tts ... --chunk` | Splits into ~850-character chunks |
 
-Options: `--headed` (visible browser), `--debug` (screenshot + HTML), `--timeout 300`, `--url`, `--button`, `--chunk-chars`.
+Options: `--headed` (visible browser), `--debug` (screenshot + HTML), `--timeout 300`, `--url`, `--button`, `--chunk-chars`, `--lang fr|en`, `--no-voice`.
+
+### Default voices
+
+| Language | Voice |
+|---|---|
+| French | Martin Dupont Aimable |
+| English | Roderic - Authoritative & Refined |
+
+The language is detected from the text (French wins ties). Force it with `--lang fr` or `--lang en`; `--voice NAME` overrides the voice, `--no-voice` keeps the studio's active voice.
 
 ### Example
 
@@ -143,6 +152,7 @@ Details and agent procedure: [SKILL.md](SKILL.md).
 
 - **ToS** — official download is reserved for paid plans; this project captures the preview. Use at your own risk.
 - **Quota** — the button shows "X free minutes left". It is unknown whether it is consumed by the synthesis or by the video render.
+- **Daily limit** — HeyGen returns `400140 Daily rate limit exceeded` after a batch of clips; wait for the daily reset.
 - **Moving UI** — selectors can break. `--debug` writes a screenshot and the HTML to `~/.config/heygen-tts/debug/`.
 - **UI language** — selectors are verified against the French UI; English labels are a best guess.
 - **Free plan** — no HeyGen credits at all. A credit counter on screen means a paid account.

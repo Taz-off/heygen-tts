@@ -83,6 +83,7 @@ def run_case(port, name, text, extra, checks):
                 "--out", str(out),
                 "--url", f"http://127.0.0.1:{port}",
                 "--no-auth",
+                "--no-voice",
                 "--timeout", "60",
                 *extra,
             ],
@@ -103,12 +104,30 @@ def run_case(port, name, text, extra, checks):
         return ok
 
 
+def test_defaults():
+    sys.path.insert(0, str(HERE))
+    import heygen_tts as h
+
+    checks = {
+        "french detected": h.detect_lang("Bonjour, ceci est un test en français.") == "fr",
+        "english detected": h.detect_lang("Hello, this is an English test.") == "en",
+        "french default": h.DEFAULT_VOICES["fr"] == "Martin Dupont Aimable",
+        "english default": h.DEFAULT_VOICES["en"] == "Roderic - Authoritative & Refined",
+    }
+    ok = True
+    for label, passed in checks.items():
+        print(("OK   " if passed else "FAIL ") + f"defaults: {label}")
+        ok = ok and passed
+    return ok
+
+
 def main():
     port = free_port()
     server = http.server.HTTPServer(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     results = [
+        test_defaults(),
         run_case(
             port, "simple", "hello this is a test",
             [],

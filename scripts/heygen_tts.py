@@ -32,7 +32,7 @@ CHALLENGE_RE = re.compile(
     r"verify you are human|v[eé]rifiez que vous [eê]tes humain|just a moment|un instant",
     re.I,
 )
-GENERATE_RE = re.compile(r"generate|g[eé]n[eé]rer|create speech|cr[eé]er", re.I)
+GENERATE_RE = re.compile(r"^\s*(generate|g[eé]n[eé]rer|create speech|cr[eé]er)\b", re.I)
 # UI labels: French is the verified locale, English is the fallback guess.
 MINE_RE = re.compile(r"^(Mes voix|My voices)$", re.I)
 LIBRARY_RE = re.compile(r"(Bibliothèque HeyGen|Voice Library|HeyGen Library)", re.I)
@@ -47,6 +47,19 @@ VOICE_CARD_JS = """() => {
         .map(e => e.getAttribute('title'));
     return [...cards, ...rows].filter(Boolean);
 }"""
+# Default voices by language. `--voice` overrides; `--no-voice` keeps the studio's active voice.
+DEFAULT_VOICES = {
+    "fr": "Martin Dupont Aimable",
+    "en": "Roderic - Authoritative & Refined",
+}
+FRENCH_RE = re.compile(
+    r"[àâçéèêëîïôùûüÿœ]|\b(le|la|les|un|une|des|du|de|et|est|pour|avec|dans|que|qui|sur|pas|vous|nous|je|tu|il|elle|ce|cette|au|aux)\b",
+    re.I,
+)
+ENGLISH_RE = re.compile(
+    r"\b(the|and|is|are|to|of|in|for|with|that|this|you|we|it|on|as|be|at|by|from|or)\b",
+    re.I,
+)
 
 
 def log(msg):
@@ -193,7 +206,10 @@ def pick_voice(page, voice):
 
 def click_generate(page, button):
     pattern = re.compile(re.escape(button), re.I) if button else GENERATE_RE
-    loc = page.get_by_role("button", name=pattern)
+    composer = page.locator("[data-pacific-component='VoiceComposerBox']")
+    loc = composer.get_by_role("button", name=pattern) if composer.count() else page.get_by_role("button", name=pattern)
+    if not loc.count():
+        loc = page.get_by_role("button", name=pattern)
     if not loc.count():
         loc = page.locator("button", has_text=pattern)
     if not loc.count():
@@ -237,13 +253,13 @@ class AudioCatcher:
             ts = time.time()
             if "text_to_speech.stream" in url or "ndjson" in ctype:
                 self.streams.append(response)
-                log("TTS stream detected")
+                log(f"TTS stream detected: {url[:160]}")
                 return
             if "audio/" in ctype or url.split("?")[0].lower().endswith(AUDIO_EXT):
                 body = response.body()
                 if len(body) > 2000:
                     self.items.append((ts, len(body), url, body))
-                    log(f"audio captured: {len(body)} bytes")
+                    log(f"audio captured: {len(body)} bytes ({url[:160]})")
                     return
             if "json" in ctype:
                 found = list(_audio_urls(response.json()))
@@ -287,6 +303,10 @@ def save_audio(page, catcher, min_seconds=0.0):
         except Exception:
             continue
         data, url = _ndjson_audio(body)
+        if b"Daily rate limit exceeded" in body:
+            die("HeyGen daily rate limit exceeded (code 400140): retry tomorrow or use another account", 4)
+        if not data and not url:
+            log(f"stream body: {body[:300]!r}")
         sources = [(data, "raw.mp3")] if data and len(data) > 2000 else []
         if url:
             sources.append((None, url))
@@ -417,6 +437,13 @@ def chunk_text(text, limit):
     return chunks
 
 
+def detect_lang(text):
+    """French when French markers win or tie; the UI and the user are French-first."""
+    fr = len(FRENCH_RE.findall(text))
+    en = len(ENGLISH_RE.findall(text))
+    return "fr" if fr >= en else "en"
+
+
 # ---------------------------------------------------------------- commands
 def cmd_doctor(args):
     report = {
@@ -508,7 +535,8 @@ def cmd_voices(args):
         context.close()
 
     VOICES_FILE.write_text(
-        json.dumps({"mine": mine, "library": library}, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps({"mine": mine, "library": library, "defaults": DEFAULT_VOICES}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     print(
         json.dumps(
@@ -517,6 +545,7 @@ def cmd_voices(args):
                 "mine": mine,
                 "library": library[: args.limit],
                 "library_total": len(library),
+                "defaults": DEFAULT_VOICES,
                 "file": str(VOICES_FILE),
             },
             ensure_ascii=False,
@@ -646,6 +675,9 @@ def cmd_tts(args):
     text = Path(args.text_file).read_text(encoding="utf-8") if args.text_file else args.text
     if not text or not text.strip():
         die("empty text")
+    lang = args.lang if args.lang != "auto" else detect_lang(text)
+    if not args.voice and not args.no_voice:
+        args.voice = DEFAULT_VOICES[lang]
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     ensure_deps()
@@ -677,6 +709,7 @@ def cmd_tts(args):
         "silent": db is not None and db < -45,
         "chunks": len(chunks),
         "voice": args.voice,
+        "lang": lang,
         "credits": 0,
     }
     print(json.dumps(result, ensure_ascii=False))
@@ -706,6 +739,8 @@ def main():
     p_tts.add_argument("--text")
     p_tts.add_argument("--text-file")
     p_tts.add_argument("--voice", default=None)
+    p_tts.add_argument("--lang", choices=["auto", "fr", "en"], default="auto")
+    p_tts.add_argument("--no-voice", action="store_true", help="keep the studio's active voice")
     p_tts.add_argument("--out", required=True)
     p_tts.add_argument("--url", default=VOICE_APP)
     p_tts.add_argument("--button", default=None)

@@ -36,18 +36,28 @@ It also ignores anything loaded **before** the click (voice-list preview samples
 |---|---|
 | `doctor` | Checks Python, Playwright, browser, ffmpeg |
 | `login` | One-time login, persistent profile |
-| `voices` | Lists `mine` (clones) + `library` (HeyGen library) |
+| `voices` | Lists `mine` (clones) + `library` (HeyGen library) + `defaults` |
 | `clone AUDIO` | Uploads a sample; name + consent in the window |
 | `clone AUDIO --dry-run` | Checks the wizard without uploading |
-| `tts --text "..." --voice NAME --out audio.mp3` | Text → MP3 with the chosen voice |
+| `tts --text "..." --out audio.mp3` | Text → MP3 with the default voice for the text language |
 | `tts --text-file script.txt --out audio.mp3` | Same from a file |
+| `tts ... --voice NAME` | Force a specific voice |
 | `tts ... --chunk` | Splits into ~850-character chunks and concatenates |
 
-Options: `--headed` (visible browser), `--debug` (HTML + screenshot), `--timeout 300`, `--url` / `--button` (if the UI changes), `--chunk-chars 850`, `--limit 40` (voices), `--wait 900` (clone).
+Options: `--headed` (visible browser), `--debug` (HTML + screenshot), `--timeout 300`, `--url` / `--button` (if the UI changes), `--chunk-chars 850`, `--limit 40` (voices), `--wait 900` (clone), `--lang fr|en` (default voice), `--no-voice` (keep the studio's active voice).
+
+## Default voices (2026-10-27)
+
+| Language | Voice |
+|---|---|
+| French | Martin Dupont Aimable |
+| English | Roderic - Authoritative & Refined |
+
+The language is detected from the text (French wins ties). `--lang fr` / `--lang en` forces it, `--voice NAME` overrides the voice, and `--no-voice` keeps whatever voice is active in the studio.
 
 ## Switching voices (verified 2026-10-27)
 
-`voices` returns two lists: `mine` (cloned voices) and `library` (the HeyGen voices visible on the account). To use one:
+`voices` returns `mine` (cloned voices), `library` (the HeyGen voices visible on the account) and `defaults` (the per-language defaults). To use one:
 
 ```
 tts --text-file script.txt --voice "Annie" --out audio.mp3
@@ -91,6 +101,7 @@ In headless mode, if a check appears, the script automatically relaunches the br
 | `no audio captured` (code 4) | Same; try `--url` with the AI Studio editor |
 | `silent: true` | Do not deliver; rerun with `--headed --debug` |
 | `audio too short` | The script caught a preview sample; rerun, or `--chunk` if the text is very long |
+| `Daily rate limit exceeded` (code 400140) | HeyGen's daily TTS limit is reached; retry tomorrow or use another account |
 | Preview capped at 1 minute | Rerun with `--chunk` |
 | Voice not found | `voices` for the exact names; the search is partial ("Annie" is enough) |
 | `unexpected clone wizard` | `clone ... --dry-run` to isolate, then `--debug`; the UI changed |
@@ -107,10 +118,12 @@ In headless mode, if a check appears, the script automatically relaunches the br
 - `voices` → 29 voices in `library`, `mine` empty (no clone on that account).
 - `clone ... --dry-run` → wizard reached, file input detected (MP3/WAV/MP4/WebM).
 - The text field is a `contenteditable`, not a `textarea`.
-- The default voice is "DARAN INSIDE 2 with mic".
+- Default voices: French → "Martin Dupont Aimable", English → "Roderic - Authoritative & Refined" (both found through the library search).
+- 2026-10-27: voice selection verified for both defaults; the account then hit `400140 Daily rate limit exceeded`, so the audio generation test must be rerun after the daily reset.
 
 ## Known limits
 
+- Language detection is a heuristic (accents + common words); use `--lang fr|en` for short or mixed text.
 - The HeyGen UI can change: on failure, rerun with `--debug` and look at `debug/`.
 - Selectors are verified against the **French** UI; English labels are a best guess. Any other language needs `--debug` plus a selector fix.
 - Cloning stops after the sample upload: name, consent and training are neither automated nor verified beyond that point.
