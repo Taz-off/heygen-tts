@@ -101,7 +101,7 @@ In headless mode, if a check appears, the script automatically relaunches the br
 | `no audio captured` (code 4) | Same; try `--url` with the AI Studio editor |
 | `silent: true` | Do not deliver; rerun with `--headed --debug` |
 | `audio too short` | The script caught a preview sample; rerun, or `--chunk` if the text is very long |
-| `Daily rate limit exceeded` (code 400140) | HeyGen's daily TTS limit is reached; retry tomorrow or use another account |
+| `Daily rate limit exceeded` (code 400140) | HeyGen's daily TTS limit is reached; retry after the daily reset or use the official API |
 | Preview capped at 1 minute | Rerun with `--chunk` |
 | Voice not found | `voices` for the exact names; the search is partial ("Annie" is enough) |
 | `unexpected clone wizard` | `clone ... --dry-run` to isolate, then `--debug`; the UI changed |

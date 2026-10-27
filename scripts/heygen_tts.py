@@ -304,7 +304,7 @@ def save_audio(page, catcher, min_seconds=0.0):
             continue
         data, url = _ndjson_audio(body)
         if b"Daily rate limit exceeded" in body:
-            die("HeyGen daily rate limit exceeded (code 400140): retry tomorrow or use another account", 4)
+            die("HeyGen daily rate limit exceeded (code 400140): retry after the daily reset or use the official API", 4)
         if not data and not url:
             log(f"stream body: {body[:300]!r}")
         sources = [(data, "raw.mp3")] if data and len(data) > 2000 else []
